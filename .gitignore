@@ -12,3 +12,10 @@ __pycache__/
 
 # Ignore logs
 *.log
+
+# Ignore model files
+cattle_final_archi.json
+cattle_final.weights.h5
+*.h5
+*.keras
+*.pb
