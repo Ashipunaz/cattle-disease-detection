@@ -1,21 +1,24 @@
-# Ignore Python virtual environments
+# Virtual environments
 venv/
 env/
 .venv/
 
-# Ignore Jupyter Notebook checkpoints
+# Jupyter
 .ipynb_checkpoints/
+*.ipynb
 
-# Ignore Python cache files
+# Python cache
 __pycache__/
 *.pyc
 
-# Ignore logs
+# Logs
 *.log
 
-# Ignore model files
-cattle_final_archi.json
-cattle_final.weights.h5
-*.h5
-*.keras
-*.pb
+# Unused project files
+best_model.h5
+New-Cattle-Diseasee-3/
+dataset_download.ipynb
+prepare_data.py
+youtube_main.py
+training_model_improv*/
+training_model.ipynb
