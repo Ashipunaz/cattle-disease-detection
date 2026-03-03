@@ -19,6 +19,5 @@ best_model.h5
 New-Cattle-Diseasee-3/
 dataset_download.ipynb
 prepare_data.py
-youtube_main.py
 training_model_improv*/
 training_model.ipynb
