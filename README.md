@@ -6,7 +6,7 @@ colorTo: green
 sdk: streamlit
 sdk_version: "1.26.0"
 python_version: "3.10"
-app_file: main.py
+app_file: cattle_streamlit/main.py
 pinned: false
 ---
 
