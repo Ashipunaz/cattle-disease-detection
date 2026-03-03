@@ -212,6 +212,19 @@ st.markdown("""
 def load_model():
     with open(ARCH_PATH, 'r') as f:
         config = json.load(f)
+
+    # Fix DepthwiseConv2D compatibility between TF 2.10 and newer versions
+    def fix_config(obj):
+        if isinstance(obj, dict):
+            obj.pop('groups', None)
+            for v in obj.values():
+                fix_config(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                fix_config(item)
+
+    fix_config(config)
+
     m = tf.keras.Model.from_config(config)
     m.load_weights(WEIGHTS_PATH)
     m.compile(optimizer=Adam(1e-5), loss='categorical_crossentropy', metrics=['accuracy'])
