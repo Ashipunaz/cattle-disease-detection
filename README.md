@@ -2,7 +2,7 @@
 title: Cattle Health Check
 emoji: 🐄
 colorFrom: green
-colorTo: darkgreen
+colorTo: green
 sdk: streamlit
 sdk_version: "1.26.0"
 python_version: "3.10"
