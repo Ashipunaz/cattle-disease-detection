@@ -1,51 +1,136 @@
+# Cattle Health Check
+### AI-Powered Cattle Disease Detection for Kenyan Farmers
+
+![Python](https://img.shields.io/badge/Python-3.9%20%7C%203.10-blue)
+![TensorFlow](https://img.shields.io/badge/TensorFlow-2.10-orange)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.x-red)
+![Accuracy](https://img.shields.io/badge/Accuracy-93.5%25-brightgreen)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
+
+A deep learning web application that helps Kenyan cattle farmers identify common cattle diseases from a photo. Upload an image of your animal and receive an instant diagnosis, severity assessment, and recommended action — in seconds.
+
 ---
-title: Cattle Health Check
-emoji: 🐄
-colorFrom: green
-colorTo: green
-sdk: streamlit
-sdk_version: "1.26.0"
-python_version: "3.10"
-app_file: cattle_streamlit/main.py
-pinned: false
+
+## Detectable Conditions
+
+| Condition | Severity | Action |
+|-----------|----------|--------|
+| Foot and Mouth Disease (FMD) | 🔴 Urgent | Isolate immediately, call vet today |
+| Lumpy Skin Disease (LSD) | 🔴 Urgent | Isolate, treat herd with repellent |
+| Mastitis | 🟡 Needs Attention | Contact vet for antibiotic treatment |
+| Healthy Cattle | 🟢 All Clear | Continue routine care |
+
 ---
 
-# 🐄 Cattle Health Check
+## Model Performance
 
-**Cattle Health Check** is a Streamlit app that uses AI to detect common cattle diseases from uploaded photos. It currently supports:
+| Metric | Value |
+|--------|-------|
+| Architecture | EfficientNetB0 (Transfer Learning) |
+| Training Strategy | Two-phase: frozen base then fine-tuning |
+| Training Images | 2,800 (700 per class, balanced) |
+| Validation Accuracy | **93.5%** |
+| Macro F1 Score | **0.92** |
+| Framework | TensorFlow 2.10 / Keras |
 
-- **Foot and Mouth Disease (FMD)** 🟠
-- **Lumpy Skin Disease (LSD)** 🔴
-- **Mastitis** 🟡
-- **Healthy Cattle** 🟢
+---
 
-## Features
+## Prerequisites
 
-1. Upload up to 5 photos of your cattle at a time.
-2. Get instant predictions with confidence percentages.
-3. Detailed guidance on what to do next, including vet advice.
-4. Download a PDF report for each session.
-5. Session history to track past checks.
+Before you begin, make sure the following are installed on your machine:
 
-## How It Works
+- [Python 3.9 or 3.10](https://www.python.org/downloads/) — TensorFlow 2.10 does **not** support Python 3.11+
+- [Git](https://git-scm.com/downloads) — includes Git Bash for Windows users
 
-1. Upload clear photos of your animals.
-2. The AI model predicts the condition of each animal.
-3. You see confidence levels, disease severity, and recommended actions.
-4. Download the PDF report for record-keeping or sharing with your vet.
+---
 
-## Technical Details
+## Getting Started
 
-- **Framework:** Streamlit
-- **Model:** TensorFlow CNN trained on 2,800 cattle images.
-- **Input size:** 224x224 pixels
-- **Max images per check:** 5
-- **Disease classes:** FMD, Lumpy Skin, Mastitis, Healthy
-- **PDF generation:** FPDF
+### 1. Clone the Repository
 
-## Notes
+Right-click on the folder where you want to save the project and select **"Git Bash Here"**, then run:
 
-- The tool is AI-assisted only and does **not replace a licensed veterinary officer**.
-- Photos are not stored or shared; session history is kept only while the browser is open.
+```bash
+git clone https://github.com/Ashipunaz/cattle-disease-detection.git
+cd cattle-disease-detection
+```
 
-Check the configuration reference at [Hugging Face Spaces Config](https://huggingface.co/docs/hub/spaces-config-reference)
+---
+
+### 2. Create and Activate a Virtual Environment
+
+**Windows (Git Bash):**
+```bash
+python -m venv venv
+source venv/Scripts/activate
+```
+
+**Mac / Linux:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+> You will know the environment is active when you see `(venv)` at the start of your terminal prompt.
+
+---
+
+### 3. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+### 4. Open in Jupyter Notebook *(optional — for exploring the model)*
+
+
+Right-click on the project folder, select **"Git Bash Here"**, then run:
+
+```bash
+jupyter notebook
+```
+
+Jupyter will open in your browser automatically.
+
+---
+
+### 5. Run the Streamlit App
+
+Navigate into the app folder and start the application:
+
+```bash
+cd cattle_streamlit
+streamlit run main.py
+```
+
+The app will open in your browser at:
+```
+http://localhost:8501
+```
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `ModuleNotFoundError` | Ensure venv is active, then run `pip install -r requirements.txt` |
+| `Could not load the AI model` | Check both model files are in the project root folder |
+| `streamlit: command not found` | Run `pip install streamlit` with venv active |
+| `jupyter: command not found` | Run `pip install jupyter` with venv active |
+| Slow first startup | Normal — TensorFlow loads the model into memory on first run |
+| Python version error | Use Python 3.9 or 3.10 only. Check with `python --version` |
+
+---
+
+## Disclaimer
+
+> This application provides **AI-assisted triage only**. Results do not constitute a certified veterinary diagnosis. Always consult a licensed veterinary officer for confirmation and treatment. The developers accept no liability for decisions made solely on the basis of this tool's output.
+
+---
+
+## Author
+
+**Ashipunaz** · [github.com/Ashipunaz](https://github.com/Ashipunaz)
