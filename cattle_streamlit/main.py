@@ -18,8 +18,9 @@ tf.get_logger().setLevel('ERROR')
 CLASS_NAMES  = ['fmd', 'healthy', 'lumpy skin', 'mastitis']
 IMG_SIZE     = (224, 224)
 MAX_IMAGES   = 5
-ARCH_PATH    = 'cattle_final_archi.json'
-WEIGHTS_PATH = 'cattle_final.weights.h5'
+BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
+ARCH_PATH    = os.path.join(BASE_DIR, 'cattle_final_archi.json')
+WEIGHTS_PATH = os.path.join(BASE_DIR, 'cattle_final.weights.h5')
 
 DISEASE_INFO = {
     'fmd': {
@@ -349,7 +350,7 @@ elif page == "📷  Check My Cattle":
         prev_cols = st.columns(min(len(uploaded_files), 5))
         for i, (col, uf) in enumerate(zip(prev_cols, uploaded_files)):
             with col:
-                st.image(Image.open(uf), caption=f'Animal {i+1}', use_column_width=True)
+                st.image(Image.open(uf), caption=f'Animal {i+1}', use_container_width=True)
 
         st.divider()
         st.markdown("**Step 2 — Run the Check**")
@@ -403,7 +404,7 @@ elif page == "📷  Check My Cattle":
             col_img, col_res = st.columns([1, 1], gap="large")
 
             with col_img:
-                st.image(Image.open(io.BytesIO(r['image_bytes'])), use_column_width=True)
+                st.image(Image.open(io.BytesIO(r['image_bytes'])), use_container_width=True)
 
             with col_res:
                 st.subheader(f"{info['emoji']}  {info['full_name']}")
@@ -496,7 +497,7 @@ elif page == "📋  Past Checks":
             st.session_state.history   = []
             st.session_state.results   = []
             st.session_state.pdf_cache = None
-            st.experimental_rerun()
+            st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════
