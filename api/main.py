@@ -18,7 +18,7 @@ CLASS_NAMES = ["fmd", "healthy", "lumpy skin", "mastitis"]
 # Map of version -> model file path (relative to project root)
 MODEL_PATHS: Dict[str, str] = {
     "v1": "cattle_disease_model.h5",
-    # add more versions as you train them:
+    # later:
     # "v2": "models/cattle_disease_model_v2.h5",
 }
 
@@ -120,13 +120,16 @@ def predict_single(image_bytes: bytes, version: str) -> dict:
     preds = model.predict(x, verbose=0)[0]
     idx = int(np.argmax(preds))
     disease = CLASS_NAMES[idx]
-    confidence = float(preds[idx]) * 100.0
+
+    # Confidence as whole-number percentage, e.g. 95
+    confidence = int(round(float(preds[idx]) * 100.0))
+
     info = DISEASE_INFO[disease]
 
     return {
         "model_version": version,
         "predicted_class": disease,
-        "confidence": confidence,
+        "confidence": confidence,  # whole-number percent
         "probabilities": {
             CLASS_NAMES[i]: float(p) for i, p in enumerate(preds)
         },
