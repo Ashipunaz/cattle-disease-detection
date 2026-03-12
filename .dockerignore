@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+New-Cattle-Diseasee-3/
+*.ipynb
+.git/
+.github/
