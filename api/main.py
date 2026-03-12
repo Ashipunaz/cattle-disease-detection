@@ -1,32 +1,62 @@
 import io
 import os
-from datetime import datetime
-from typing import List
+from typing import Dict
 
 import numpy as np
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
-from fpdf import FPDF
 import tensorflow as tf
 
 # -------------------------------------------------------------------
-# Model + core config
+# Model configuration & versioning
 # -------------------------------------------------------------------
-
-MODEL_PATH = "cattle_disease_model.h5"
-
-# Load model once at startup
-model = tf.keras.models.load_model(MODEL_PATH)
 
 IMG_SIZE = (224, 224)
 CLASS_NAMES = ["fmd", "healthy", "lumpy skin", "mastitis"]
 
+# Map of version -> model file path (relative to project root)
+MODEL_PATHS: Dict[str, str] = {
+    "v1": "cattle_disease_model.h5",
+    # add more versions as you train them:
+    # "v2": "models/cattle_disease_model_v2.h5",
+}
+
+# Default version (can also be set via env var on Render)
+DEFAULT_MODEL_VERSION = os.getenv("MODEL_VERSION", "v1")
+
+# Cache of loaded models to avoid reloading on every request
+_loaded_models: Dict[str, tf.keras.Model] = {}
+
+
+def get_model(version: str) -> tf.keras.Model:
+    if version not in MODEL_PATHS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown model version '{version}'. Available: {list(MODEL_PATHS.keys())}",
+        )
+    if version in _loaded_models:
+        return _loaded_models[version]
+
+    path = MODEL_PATHS[version]
+    if not os.path.exists(path):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Model file not found for version '{version}' at '{path}'",
+        )
+
+    model = tf.keras.models.load_model(path)
+    _loaded_models[version] = model
+    return model
+
+
+# Preload default model at startup
+_active_version = DEFAULT_MODEL_VERSION
+get_model(_active_version)
+
 DISEASE_INFO = {
     "fmd": {
         "full_name":    "Foot and Mouth Disease",
-        "emoji":        "🟠",
         "severity":     "Urgent",
         "requires_vet": True,
         "what_you_see": "Blisters on the mouth, tongue, and hooves. The animal may be drooling heavily or struggling to walk.",
@@ -35,7 +65,6 @@ DISEASE_INFO = {
     },
     "healthy": {
         "full_name":    "No Disease Detected",
-        "emoji":        "🟢",
         "severity":     "All Clear",
         "requires_vet": False,
         "what_you_see": "The animal shows no visible signs of disease.",
@@ -44,7 +73,6 @@ DISEASE_INFO = {
     },
     "lumpy skin": {
         "full_name":    "Lumpy Skin Disease",
-        "emoji":        "🔴",
         "severity":     "Urgent",
         "requires_vet": True,
         "what_you_see": "Round raised lumps or nodules appearing across the skin. The animal may have a fever and reduced milk output.",
@@ -53,7 +81,6 @@ DISEASE_INFO = {
     },
     "mastitis": {
         "full_name":    "Mastitis",
-        "emoji":        "🟡",
         "severity":     "Needs Attention",
         "requires_vet": True,
         "what_you_see": "The udder looks swollen or feels warm and painful. Milk may appear watery, lumpy, or discoloured.",
@@ -62,237 +89,46 @@ DISEASE_INFO = {
     },
 }
 
-
-def safe(text):
-    return (
-        str(text)
-        .replace("\u2014", "-").replace("\u2013", "-")
-        .replace("\u2018", "'").replace("\u2019", "'")
-        .replace("\u201c", '"').replace("\u201d", '"')
-        .replace("\u2192", "->").replace("\u2022", "-")
-    )
-
 # -------------------------------------------------------------------
-# PDF builder (from Streamlit app)
-# -------------------------------------------------------------------
-
-def build_pdf(results):
-    PAGE_W = 210
-    PAGE_H = 297
-    M = 12
-    CONT_W = PAGE_W - M * 2
-    IMG_W = 68
-    COL2_X = M + IMG_W + 6
-    COL2_W = PAGE_W - COL2_X - M
-    FOOTER_Y = PAGE_H - 11
-    MAX_Y = PAGE_H - 20
-
-    pdf = FPDF(unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=False)
-
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-
-    for rec_idx, r in enumerate(results):
-        pdf.add_page()
-        info = DISEASE_INFO[r["disease"]]
-
-        # Header
-        pdf.set_fill_color(31, 41, 55)
-        pdf.rect(0, 0, PAGE_W, 22, "F")
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_xy(M, 5)
-        pdf.cell(CONT_W, 7, safe("Cattle Health Check  -  Disease Report"))
-        pdf.set_font("Helvetica", "", 7)
-        pdf.set_text_color(156, 163, 175)
-        pdf.set_xy(M, 14)
-        pdf.cell(
-            CONT_W,
-            5,
-            safe(
-                f'Date: {datetime.now().strftime("%d %B %Y  %I:%M %p")}  |  '
-                f'Animal {rec_idx + 1} of {len(results)}  |  Photo: {r["filename"]}'
-            ),
-        )
-
-        y = 26
-
-        # Image
-        img_path = os.path.join(base_dir, f"_tmp_img_{rec_idx}.jpg")
-        pil_img = Image.open(io.BytesIO(r["image_bytes"])).convert("RGB")
-        w, h = pil_img.size
-        px = int(IMG_W * 3.7795)  # mm to px approx
-        if w > px:
-            pil_img = pil_img.resize((px, int(h * px / w)), Image.LANCZOS)
-        img_h_mm = IMG_W * (pil_img.size[1] / pil_img.size[0])
-        pil_img.save(img_path, format="JPEG", quality=55, optimize=True)
-        pdf.image(img_path, x=M, y=y, w=IMG_W)
-        os.remove(img_path)
-
-        # Right column
-        ry = y
-        pdf.set_font("Helvetica", "B", 13)
-        pdf.set_text_color(31, 41, 55)
-        pdf.set_xy(COL2_X, ry)
-        pdf.multi_cell(COL2_W, 6.5, safe(info["full_name"]))
-        ry = pdf.get_y()
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(107, 114, 128)
-        pdf.set_xy(COL2_X, ry)
-        pdf.cell(COL2_W, 5, safe(f'Confidence: {r["confidence"]:.0f}%'))
-        ry += 6
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(21, 128, 61)
-        pdf.set_xy(COL2_X, ry)
-        pdf.cell(COL2_W, 5, safe(info["urgency_msg"]))
-        ry += 7
-
-        for lbl, val in [
-            ("Vet Required", "Yes" if info["requires_vet"] else "No"),
-            ("Status", info["severity"]),
-        ]:
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(107, 114, 128)
-            pdf.set_xy(COL2_X, ry)
-            pdf.cell(28, 5, safe(lbl + ":"), ln=False)
-            pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(55, 65, 81)
-            pdf.cell(COL2_W - 28, 5, safe(val))
-            ry += 5.5
-
-        y = max(y + img_h_mm, ry) + 5
-        pdf.set_draw_color(209, 213, 219)
-        pdf.line(M, y, PAGE_W - M, y)
-        y += 4
-
-        # What you see
-        if y < MAX_Y:
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(107, 114, 128)
-            pdf.set_xy(M, y)
-            pdf.cell(CONT_W, 5, "What You Are Seeing:")
-            y += 5.5
-            pdf.set_font("Helvetica", "I", 8)
-            pdf.set_text_color(75, 85, 99)
-            pdf.set_xy(M, y)
-            pdf.multi_cell(CONT_W, 4.5, safe(info["what_you_see"]))
-            y = pdf.get_y() + 3
-
-        # What to do
-        if y < MAX_Y:
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(107, 114, 128)
-            pdf.set_xy(M, y)
-            pdf.cell(CONT_W, 5, "What To Do:")
-            y += 5.5
-            pdf.set_fill_color(249, 250, 251)
-            pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(55, 65, 81)
-            pdf.set_xy(M, y)
-            pdf.multi_cell(CONT_W, 4.5, safe(info["what_to_do"]), fill=True)
-            y = pdf.get_y() + 5
-
-        # Analysis breakdown bars
-        LABEL_W = 78
-        PCT_W = 16
-        BAR_X = M + LABEL_W + PCT_W
-        BAR_W = CONT_W - LABEL_W - PCT_W
-        if y < MAX_Y:
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(107, 114, 128)
-            pdf.set_xy(M, y)
-            pdf.cell(CONT_W, 5, "Analysis Breakdown:")
-            y += 6
-            for cname, prob in zip(CLASS_NAMES, r["all_preds"]):
-                if y >= MAX_Y:
-                    break
-                pct = float(prob) * 100
-                is_top = cname == r["disease"]
-                fill_w = BAR_W * (pct / 100.0)
-
-                pdf.set_font("Helvetica", "B" if is_top else "", 7.5)
-                pdf.set_text_color(31, 41, 55)
-                pdf.set_xy(M, y)
-                pdf.cell(
-                    LABEL_W,
-                    5,
-                    safe(("> " if is_top else "   ") + DISEASE_INFO[cname]["full_name"]),
-                    ln=False,
-                )
-                pdf.set_font("Helvetica", "B" if is_top else "", 7.5)
-                pdf.set_text_color(21, 128, 61)
-                pdf.cell(PCT_W, 5, f"{pct:.0f}%", ln=False)
-
-                bar_y = y + 1.2
-                pdf.set_fill_color(229, 231, 235)
-                pdf.rect(BAR_X, bar_y, BAR_W, 2.8, "F")
-                if fill_w > 0.1:
-                    if is_top:
-                        pdf.set_fill_color(21, 128, 61)
-                    else:
-                        pdf.set_fill_color(156, 163, 175)
-                    pdf.rect(BAR_X, bar_y, fill_w, 2.8, "F")
-
-                y += 6.5
-
-        # Footer
-        pdf.set_xy(M, FOOTER_Y)
-        pdf.set_font("Helvetica", "I", 6)
-        pdf.set_text_color(140, 140, 140)
-        pdf.cell(
-            CONT_W,
-            4,
-            safe(
-                "AI-assisted only. Does NOT replace a veterinary diagnosis. "
-                "Always consult a licensed vet.  |  Cattle Health Check Kenya"
-            ),
-            align="C",
-        )
-
-    return bytes(pdf.output())
-
-# -------------------------------------------------------------------
-# Prediction helper
-# -------------------------------------------------------------------
-
-def predict_single(image_bytes: bytes):
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize(IMG_SIZE)
-    arr = np.expand_dims(np.array(img, dtype=np.float32), 0)
-    pred = model.predict(arr, verbose=0)[0]
-    idx = int(np.argmax(pred))
-    return CLASS_NAMES[idx], float(pred[idx]) * 100.0, pred
-
-# -------------------------------------------------------------------
-# FastAPI app + endpoints
+# FastAPI setup
 # -------------------------------------------------------------------
 
 app = FastAPI(title="Cattle Disease Detection API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict in production
+    allow_origins=["*"],  # tighten in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+# -------------------------------------------------------------------
+# Utility
+# -------------------------------------------------------------------
 
-@app.post("/predict")
-async def predict(file: UploadFile = File(...)):
-    """Single-image prediction, JSON response + recommendations."""
-    image_bytes = await file.read()
-    disease, confidence, all_preds = predict_single(image_bytes)
+def preprocess_image(image_bytes: bytes) -> np.ndarray:
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img = img.resize(IMG_SIZE)
+    arr = np.array(img, dtype=np.float32)  # 0–255, matches training
+    return np.expand_dims(arr, axis=0)
 
+
+def predict_single(image_bytes: bytes, version: str) -> dict:
+    model = get_model(version)
+    x = preprocess_image(image_bytes)
+    preds = model.predict(x, verbose=0)[0]
+    idx = int(np.argmax(preds))
+    disease = CLASS_NAMES[idx]
+    confidence = float(preds[idx]) * 100.0
     info = DISEASE_INFO[disease]
 
     return {
+        "model_version": version,
         "predicted_class": disease,
         "confidence": confidence,
         "probabilities": {
-            CLASS_NAMES[i]: float(p) for i, p in enumerate(all_preds)
+            CLASS_NAMES[i]: float(p) for i, p in enumerate(preds)
         },
         "info": {
             "full_name": info["full_name"],
@@ -304,38 +140,62 @@ async def predict(file: UploadFile = File(...)):
         },
     }
 
-@app.post("/analyze_batch")
-async def analyze_batch(files: List[UploadFile] = File(...)):
-    """
-    Multi-image analysis (1–5 images) via a single 'files' field.
-    Returns a downloadable PDF report summarizing predictions + recommendations.
-    """
-    if not files:
-        raise HTTPException(status_code=400, detail="No files uploaded.")
-    if len(files) > 5:
-        raise HTTPException(status_code=400, detail="You can upload at most 5 images.")
+# -------------------------------------------------------------------
+# Endpoints
+# -------------------------------------------------------------------
 
-    results = []
-    for idx, file in enumerate(files, start=1):
-        image_bytes = await file.read()
-        disease, confidence, all_preds = predict_single(image_bytes)
-        results.append(
-            {
-                "index": idx,
-                "filename": file.filename,
-                "disease": disease,
-                "confidence": confidence,
-                "all_preds": all_preds,
-                "image_bytes": image_bytes,
-            }
-        )
-
-    pdf_bytes = build_pdf(results)
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": 'attachment; filename="classification_report.pdf"'
+@app.get("/")
+def root():
+    return {
+        "message": "Cattle Disease Detection API",
+        "docs": "/docs",
+        "health": "/health",
+        "endpoints": {
+            "predict": "/predict",
+            "models": "/models",
         },
-    )
+    }
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "active_model_version": _active_version,
+        "available_versions": list(MODEL_PATHS.keys()),
+    }
+
+@app.get("/models")
+def list_models():
+    return {
+        "active_model_version": _active_version,
+        "available_versions": MODEL_PATHS,
+    }
+
+@app.post("/models/set-active")
+def set_active_model(version: str):
+    global _active_version
+    if version not in MODEL_PATHS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown model version '{version}'. Available: {list(MODEL_PATHS.keys())}",
+        )
+    # ensure it loads successfully before switching
+    get_model(version)
+    _active_version = version
+    return {"active_model_version": _active_version}
+
+@app.post("/predict")
+async def predict(
+    file: UploadFile = File(...),
+    version: str = Query(default=None, description="Optional model version to use"),
+):
+    """
+    Single-image prediction.
+
+    - Upload one image file as 'file' (multipart/form-data).
+    - Optionally pass ?version=v1/v2 to override the active model.
+    """
+    image_bytes = await file.read()
+    v = version or _active_version
+    result = predict_single(image_bytes, v)
+    return result
