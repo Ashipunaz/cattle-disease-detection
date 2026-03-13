@@ -11,24 +11,15 @@ import tensorflow as tf
 
 APP_BUILD = os.getenv("RENDER_GIT_COMMIT", "local")
 
-# -------------------------------------------------------------------
-# Security / deployment settings (env-driven)
-# -------------------------------------------------------------------
-
-# CORS: comma-separated list of allowed origins, e.g.
-# "https://your-frontend.com,https://www.your-frontend.com"
 _cors_origins_raw = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
 CORS_ALLOW_ORIGINS: List[str] = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
 if not CORS_ALLOW_ORIGINS:
-    # Safe-ish dev default. Set CORS_ALLOW_ORIGINS explicitly in production.
     CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://localhost:8501"]
 
 CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
 
-# Admin key to protect sensitive routes (set this in Render env vars)
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
 
-# Upload protection
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))  # 5MB default
 MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", str(20_000_000)))       # 20 MP default
 ALLOWED_IMAGE_CONTENT_TYPES = {
@@ -40,7 +31,6 @@ ALLOWED_IMAGE_CONTENT_TYPES = {
     if ct.strip()
 }
 
-# Basic per-IP rate limit (best-effort, in-memory; use a gateway/WAF for stronger control)
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
 _rate_state: Dict[str, Dict[str, float]] = {}
 # -------------------------------------------------------------------

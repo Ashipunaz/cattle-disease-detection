@@ -83,7 +83,34 @@ pip install -r requirements.txt
 
 ---
 
-### 4. Open in Jupyter Notebook *(optional — for exploring the model)*
+### 4. Backend API (FastAPI)
+
+This project exposes a production-ready HTTP API for model inference.
+
+- API implementation: `api/main.py` (FastAPI + TensorFlow)
+- Deployed base URL (Render): `https://cattle-disease-detection-q8x2.onrender.com`
+- Interactive docs: `https://cattle-disease-detection-q8x2.onrender.com/docs`
+
+See `API_CONSUMER_GUIDE.md` for full endpoint details and examples.
+
+#### Run the API locally
+
+From the project root with the virtual environment active:
+
+```bash
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Local docs: `http://127.0.0.1:8000/docs`
+
+#### Docker (for local or other hosts)
+
+```bash
+docker build -t cattle-api .
+docker run -p 8000:8000 cattle-api
+```
+
+### 5. Open in Jupyter Notebook *(optional — for exploring the model)*
 
 
 Right-click on the project folder, select **"Git Bash Here"**, then run:
@@ -96,7 +123,7 @@ Jupyter will open in your browser automatically.
 
 ---
 
-### 5. Run the Streamlit App
+### 6. Run the Streamlit App
 
 Navigate into the app folder and start the application:
 
@@ -109,6 +136,20 @@ The app will open in your browser at:
 ```
 http://localhost:8501
 ```
+
+---
+
+## Deployment and Security
+
+- The Render deployment reads its configuration from environment variables:
+  - `CORS_ALLOW_ORIGINS` – comma-separated list of allowed origins.
+  - `CORS_ALLOW_CREDENTIALS` – usually `false` unless you control the frontend.
+  - `MAX_UPLOAD_BYTES`, `MAX_IMAGE_PIXELS` – upload and image safety limits.
+  - `RATE_LIMIT_PER_MINUTE` – basic per-IP rate limiting.
+  - `ADMIN_API_KEY` – optional; protects `/models/set-active` when enabled.
+- Do **not** hard-code API keys or secrets in notebooks or source files. Use env vars instead.
+
+
 
 ---
 
