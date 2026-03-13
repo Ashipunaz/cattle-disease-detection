@@ -1,13 +1,48 @@
 import io
 import os
-from typing import Dict
+import time
+from typing import Dict, List, Optional
 
 import numpy as np
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
 
+APP_BUILD = os.getenv("RENDER_GIT_COMMIT", "local")
+
+# -------------------------------------------------------------------
+# Security / deployment settings (env-driven)
+# -------------------------------------------------------------------
+
+# CORS: comma-separated list of allowed origins, e.g.
+# "https://your-frontend.com,https://www.your-frontend.com"
+_cors_origins_raw = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+CORS_ALLOW_ORIGINS: List[str] = [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+if not CORS_ALLOW_ORIGINS:
+    # Safe-ish dev default. Set CORS_ALLOW_ORIGINS explicitly in production.
+    CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://localhost:8501"]
+
+CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "false").lower() == "true"
+
+# Admin key to protect sensitive routes (set this in Render env vars)
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
+
+# Upload protection
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))  # 5MB default
+MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", str(20_000_000)))       # 20 MP default
+ALLOWED_IMAGE_CONTENT_TYPES = {
+    ct.strip().lower()
+    for ct in os.getenv(
+        "ALLOWED_IMAGE_CONTENT_TYPES",
+        "image/jpeg,image/png,image/webp",
+    ).split(",")
+    if ct.strip()
+}
+
+# Basic per-IP rate limit (best-effort, in-memory; use a gateway/WAF for stronger control)
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+_rate_state: Dict[str, Dict[str, float]] = {}
 # -------------------------------------------------------------------
 # Model configuration & versioning
 # -------------------------------------------------------------------
@@ -97,18 +132,76 @@ app = FastAPI(title="Cattle Disease Detection API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten in production
-    allow_credentials=True,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    client_ip = (request.client.host if request.client else "unknown").strip()
+    now = time.time()
+    window = 60.0
+
+    state = _rate_state.get(client_ip)
+    if not state or now >= state["reset_at"]:
+        state = {"count": 0.0, "reset_at": now + window}
+        _rate_state[client_ip] = state
+
+    state["count"] += 1.0
+    if RATE_LIMIT_PER_MINUTE > 0 and state["count"] > RATE_LIMIT_PER_MINUTE:
+        retry_after = max(1, int(state["reset_at"] - now))
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please retry later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    return await call_next(request)
 
 # -------------------------------------------------------------------
 # Utility
 # -------------------------------------------------------------------
 
+async def read_upload_limited(file: UploadFile) -> bytes:
+    if file.content_type:
+        ct = file.content_type.lower().strip()
+        if ct not in ALLOWED_IMAGE_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported media type '{file.content_type}'. Allowed: {sorted(ALLOWED_IMAGE_CONTENT_TYPES)}",
+            )
+
+    buf = bytearray()
+    chunk_size = 1024 * 1024  # 1MB
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Max allowed is {MAX_UPLOAD_BYTES} bytes.",
+            )
+    return bytes(buf)
+
+
 def preprocess_image(image_bytes: bytes) -> np.ndarray:
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image file.")
+
+    w, h = img.size
+    if w * h > MAX_IMAGE_PIXELS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image resolution too large ({w}x{h}).",
+        )
+
     img = img.resize(IMG_SIZE)
     arr = np.array(img, dtype=np.float32)  # 0–255, matches training
     return np.expand_dims(arr, axis=0)
@@ -165,6 +258,8 @@ def health():
         "status": "ok",
         "active_model_version": _active_version,
         "available_versions": list(MODEL_PATHS.keys()),
+         "build": APP_BUILD,
+         "rate_limit_per_minute": RATE_LIMIT_PER_MINUTE,
     }
 
 @app.get("/models")
@@ -175,7 +270,16 @@ def list_models():
     }
 
 @app.post("/models/set-active")
-def set_active_model(version: str):
+def set_active_model(
+    version: str,
+    x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+):
+    if not ADMIN_API_KEY:
+        # Hide the endpoint if not configured
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not x_admin_key or x_admin_key != ADMIN_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     global _active_version
     if version not in MODEL_PATHS:
         raise HTTPException(
@@ -198,7 +302,7 @@ async def predict(
     - Upload one image file as 'file' (multipart/form-data).
     - Optionally pass ?version=v1/v2 to override the active model.
     """
-    image_bytes = await file.read()
+    image_bytes = await read_upload_limited(file)
     v = version or _active_version
     result = predict_single(image_bytes, v)
     return result
